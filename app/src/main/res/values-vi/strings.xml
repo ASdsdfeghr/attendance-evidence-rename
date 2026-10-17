@@ -1,0 +1,50 @@
+<resources>
+    <string name="app_name">Điểm Danh Bóng Chuyền NQD</string>
+    <string name="header_title">NQD Volley Attendance</string>
+    <string name="school_subtitle">THPT Chuyên Nguyễn Quang Diêu • Từ 2017</string>
+
+    <string name="hero_tagline">Bảng Điểm Danh Ngày Thi Đấu</string>
+    <string name="hero_instructions">Chọn ảnh điểm danh trên sân để tự động đổi tên theo ngày chụp d-m.jpg.</string>
+    <string name="action_select_photos">Chọn Ảnh</string>
+
+    <string name="roster_section_title">Danh Sách Ảnh Đã Chọn</string>
+    <string name="tap_date_hint">Chạm vào thẻ để đổi ngày</string>
+
+    <string name="chip_duplicate">Trùng Ngày</string>
+    <string name="chip_fallback">Dự Phòng</string>
+    <string name="chip_manual">Thủ Công</string>
+
+    <string name="empty_state_message">Chưa có ảnh nào. Hãy chọn ảnh điểm danh của bạn.</string>
+
+    <string name="bottom_bar_queue_label">Hàng Đợi</string>
+    <plurals name="photo_count_selected">
+        <item quantity="one">%d ảnh sẵn sàng</item>
+        <item quantity="other">%d ảnh sẵn sàng</item>
+    </plurals>
+    <string name="action_rename_all">Đổi Tên Tất Cả</string>
+    <string name="action_renaming">Đang Xử Lý…</string>
+
+    <plurals name="photos_renamed_result">
+        <item quantity="one">Đã đổi tên %d ảnh</item>
+        <item quantity="other">Đã đổi tên %d ảnh</item>
+    </plurals>
+    <string name="action_share">Chia Sẻ</string>
+    <string name="action_start_over">Làm Lại</string>
+    <string name="action_open">Mở</string>
+
+    <string name="action_confirm_date">Xác Nhận Ngày</string>
+    <string name="action_cancel">Hủy</string>
+
+    <string name="error_reading_photos">Không thể đọc ảnh đã chọn: %1$s</string>
+    <string name="error_saving_photos">Lỗi khi lưu một số ảnh: %1$s</string>
+    <string name="error_storage_permission">Cần quyền bộ nhớ trên Android 9 trở xuống.</string>
+    <string name="error_no_gallery_app">Không tìm thấy ứng dụng Thư viện để mở ảnh.</string>
+    <string name="error_share_failed">Không thể chia sẻ ảnh.</string>
+
+    <string name="cd_club_logo">Logo CLB Bóng chuyền NQD</string>
+    <string name="cd_school_badge">Huy hiệu Trường THPT Chuyên Nguyễn Quang Diêu</string>
+    <string name="cd_volleyball_icon">Biểu tượng bóng chuyền</string>
+    <string name="cd_success_check">Biểu tượng hoàn tất đổi tên</string>
+    <string name="cd_photo_thumbnail">Ảnh thu nhỏ của %1$s</string>
+    <string name="cd_change_date">Đổi ngày chụp cho %1$s</string>
+</resources>
