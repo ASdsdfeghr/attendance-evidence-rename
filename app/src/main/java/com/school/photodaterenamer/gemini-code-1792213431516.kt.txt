@@ -1,0 +1,32 @@
+package com.school.photodaterenamer
+
+import android.os.Bundle
+import android.widget.ScrollView
+import android.widget.TextView
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.lightColorScheme
+
+private val AppColorScheme = lightColorScheme()
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        try {
+            setContent {
+                MaterialTheme(colorScheme = AppColorScheme) {
+                    PhotoRenamerScreen()
+                }
+            }
+        } catch (t: Throwable) {
+            val errorView = TextView(this).apply {
+                text = "Startup Error:\n\n${t.stackTraceToString()}"
+                setPadding(40, 40, 40, 40)
+                textSize = 13f
+            }
+            setContentView(ScrollView(this).apply { addView(errorView) })
+        }
+    }
+}
