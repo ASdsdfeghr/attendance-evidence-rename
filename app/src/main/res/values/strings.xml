@@ -1,0 +1,50 @@
+<resources>
+    <string name="app_name">NQD Volley Attendance</string>
+    <string name="header_title">NQD Volley Attendance</string>
+    <string name="school_subtitle">THPT Chuyên Nguyễn Quang Diêu • Since 2017</string>
+
+    <string name="hero_tagline">Match-Day Attendance Roster</string>
+    <string name="hero_instructions">Pick your court shots to auto-tag each file as d-m.jpg from EXIF capture dates.</string>
+    <string name="action_select_photos">Select Photos</string>
+
+    <string name="roster_section_title">Attendance Roster</string>
+    <string name="tap_date_hint">Tap a row to adjust date</string>
+
+    <string name="chip_duplicate">Duplicate</string>
+    <string name="chip_fallback">Fallback</string>
+    <string name="chip_manual">Manual</string>
+
+    <string name="empty_state_message">No photos yet. Pick your attendance shots.</string>
+
+    <string name="bottom_bar_queue_label">Match Queue</string>
+    <plurals name="photo_count_selected">
+        <item quantity="one">%d photo ready</item>
+        <item quantity="other">%d photos ready</item>
+    </plurals>
+    <string name="action_rename_all">Rename All</string>
+    <string name="action_renaming">Renaming…</string>
+
+    <plurals name="photos_renamed_result">
+        <item quantity="one">%d photo renamed</item>
+        <item quantity="other">%d photos renamed</item>
+    </plurals>
+    <string name="action_share">Share</string>
+    <string name="action_start_over">Start Over</string>
+    <string name="action_open">Open</string>
+
+    <string name="action_confirm_date">Confirm Date</string>
+    <string name="action_cancel">Cancel</string>
+
+    <string name="error_reading_photos">Could not read selected photo(s): %1$s</string>
+    <string name="error_saving_photos">Failed to rename some photos: %1$s</string>
+    <string name="error_storage_permission">Storage permission is required on Android 9 and below.</string>
+    <string name="error_no_gallery_app">No gallery app found to open this image.</string>
+    <string name="error_share_failed">Unable to share photos.</string>
+
+    <string name="cd_club_logo">NQD Volleyball Club logo</string>
+    <string name="cd_school_badge">THPT Chuyên Nguyễn Quang Diêu school badge</string>
+    <string name="cd_volleyball_icon">Volleyball empty state icon</string>
+    <string name="cd_success_check">Rename completed check icon</string>
+    <string name="cd_photo_thumbnail">Thumbnail for %1$s</string>
+    <string name="cd_change_date">Change capture date for %1$s</string>
+</resources>
