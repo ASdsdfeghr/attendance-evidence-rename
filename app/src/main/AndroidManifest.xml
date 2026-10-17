@@ -7,7 +7,9 @@
 
     <application
         android:allowBackup="true"
-        android:label="Photo Date Renamer"
+        android:icon="@drawable/club_icon"
+        android:roundIcon="@drawable/club_icon"
+        android:label="NQD Volley"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
