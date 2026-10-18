@@ -19,6 +19,7 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -66,6 +67,8 @@ object PhotoUtils {
         DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.US),
         DateTimeFormatter.ofPattern("yyyy/MM/dd", Locale.US)
     )
+
+    private val exifWriteFormatter = DateTimeFormatter.ofPattern("yyyy:MM:dd HH:mm:ss", Locale.US)
 
     /**
      * Strictly formats the date as "d-m" without leading zeros or year (e.g. 5-3, 12-8).
@@ -166,7 +169,6 @@ object PhotoUtils {
                         if (idx >= 0 && !cursor.isNull(idx)) {
                             val rawValue = cursor.getLong(idx)
                             if (rawValue > 0L) {
-                                // MediaStore DATE_MODIFIED is in seconds; Document COLUMN_LAST_MODIFIED is in millis
                                 val epochMillis = if (rawValue < 10_000_000_000L) rawValue * 1000L else rawValue
                                 return Instant.ofEpochMilli(epochMillis)
                                     .atZone(ZoneId.systemDefault())
@@ -176,7 +178,6 @@ object PhotoUtils {
                     }
                 }
             } catch (_: Exception) {
-                // Continue to next column
             }
         }
         return null
@@ -297,6 +298,11 @@ object PhotoUtils {
         buildFileName(date, extension, suffixNumber = (System.currentTimeMillis() % 10000).toInt())
     }
 
+    /**
+     * Saves the renamed photo to Pictures/Photo Date Renamer AND updates the saved copy's
+     * EXIF + MediaStore timestamps to the current moment so it appears at the very top
+     * of the Gallery / Photo Picker as the latest photo taken.
+     */
     suspend fun savePhotoToPictures(
         context: Context,
         sourceUri: Uri,
@@ -305,6 +311,12 @@ object PhotoUtils {
     ): Result<SaveResult> = withContext(Dispatchers.IO) {
         try {
             val resolver = context.contentResolver
+            val nowMillis = System.currentTimeMillis()
+            val nowSeconds = nowMillis / 1000L
+            val nowExifString = LocalDateTime.ofInstant(
+                Instant.ofEpochMilli(nowMillis),
+                ZoneId.systemDefault()
+            ).format(exifWriteFormatter)
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val relativePath = "${Environment.DIRECTORY_PICTURES}/$SUBFOLDER_NAME"
@@ -312,6 +324,9 @@ object PhotoUtils {
                     put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
                     put(MediaStore.Images.Media.MIME_TYPE, mimeType)
                     put(MediaStore.Images.Media.RELATIVE_PATH, relativePath)
+                    put(MediaStore.Images.Media.DATE_TAKEN, nowMillis)
+                    put(MediaStore.Images.Media.DATE_ADDED, nowSeconds)
+                    put(MediaStore.Images.Media.DATE_MODIFIED, nowSeconds)
                     put(MediaStore.Images.Media.IS_PENDING, 1)
                 }
 
@@ -321,13 +336,32 @@ object PhotoUtils {
                 ) ?: return@withContext Result.failure(IOException("Could not create MediaStore entry."))
 
                 try {
+                    // 1. Copy the raw image bytes losslessly
                     resolver.openInputStream(sourceUri)?.use { input ->
                         resolver.openOutputStream(targetUri, "w")?.use { output ->
                             input.copyTo(output)
                         } ?: throw IOException("Could not open output stream.")
                     } ?: throw IOException("Could not read selected image.")
 
+                    // 2. Update the NEW copy's EXIF header timestamps to NOW before MediaStore scans it.
+                    // (ExifInterface modifies only the header block without re-compressing image pixels)
+                    try {
+                        resolver.openFileDescriptor(targetUri, "rw")?.use { pfd ->
+                            val exif = ExifInterface(pfd.fileDescriptor)
+                            exif.setAttribute(ExifInterface.TAG_DATETIME, nowExifString)
+                            exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, nowExifString)
+                            exif.setAttribute(ExifInterface.TAG_DATETIME_DIGITIZED, nowExifString)
+                            exif.saveAttributes()
+                        }
+                    } catch (_: Exception) {
+                        // Ignore if image format (e.g. certain PNGs) does not support EXIF writing
+                    }
+
+                    // 3. Finalize MediaStore entry with current timestamps so Gallery puts it #1 at the top
                     val completeValues = ContentValues().apply {
+                        put(MediaStore.Images.Media.DATE_TAKEN, nowMillis)
+                        put(MediaStore.Images.Media.DATE_ADDED, nowSeconds)
+                        put(MediaStore.Images.Media.DATE_MODIFIED, nowSeconds)
                         put(MediaStore.Images.Media.IS_PENDING, 0)
                     }
                     resolver.update(targetUri, completeValues, null, null)
@@ -344,6 +378,7 @@ object PhotoUtils {
                     Result.failure(e)
                 }
             } else {
+                // Legacy Android 8.0 - 9.0 (API 26 - 28)
                 val picturesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
                 val appFolder = File(picturesDir, SUBFOLDER_NAME)
                 if (!appFolder.exists() && !appFolder.mkdirs()) {
@@ -357,10 +392,23 @@ object PhotoUtils {
                     }
                 } ?: return@withContext Result.failure(IOException("Could not read selected image."))
 
+                try {
+                    val exif = ExifInterface(outFile)
+                    exif.setAttribute(ExifInterface.TAG_DATETIME, nowExifString)
+                    exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, nowExifString)
+                    exif.setAttribute(ExifInterface.TAG_DATETIME_DIGITIZED, nowExifString)
+                    exif.saveAttributes()
+                } catch (_: Exception) {
+                }
+                outFile.setLastModified(nowMillis)
+
                 val values = ContentValues().apply {
                     put(MediaStore.Images.Media.DATA, outFile.absolutePath)
                     put(MediaStore.Images.Media.MIME_TYPE, mimeType)
                     put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+                    put(MediaStore.Images.Media.DATE_TAKEN, nowMillis)
+                    put(MediaStore.Images.Media.DATE_ADDED, nowSeconds)
+                    put(MediaStore.Images.Media.DATE_MODIFIED, nowSeconds)
                 }
                 val insertedUri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
                     ?: Uri.fromFile(outFile)
