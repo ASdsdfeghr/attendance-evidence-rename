@@ -497,4 +497,160 @@ object PhotoUtils {
             if (targetFile.exists()) return@withContext true
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val relativePath = "${Environment.DIRECTORY_
+                val relativePath = "${Environment.DIRECTORY_PICTURES}/$SUBFOLDER_NAME/"
+                val projection = arrayOf(MediaStore.Images.Media._ID)
+                val selection =
+                    "${MediaStore.Images.Media.DISPLAY_NAME} = ? AND ${MediaStore.Images.Media.RELATIVE_PATH} = ?"
+                val selectionArgs = arrayOf(fileName, relativePath)
+
+                context.contentResolver.query(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    projection,
+                    selection,
+                    selectionArgs,
+                    null
+                )?.use { cursor ->
+                    if (cursor.count > 0) return@withContext true
+                }
+            }
+            false
+        }
+
+    suspend fun findNextAvailableFileName(
+        context: Context,
+        date: LocalDate,
+        extension: String,
+        reservedNames: Set<String> = emptySet()
+    ): String = withContext(Dispatchers.IO) {
+        val firstCandidate = buildFileName(date, extension, suffixNumber = null)
+        if (firstCandidate !in reservedNames && !doesFileExistInTargetFolder(context, firstCandidate)) {
+            return@withContext firstCandidate
+        }
+        var suffix = 2
+        while (suffix < 1000) {
+            val candidate = buildFileName(date, extension, suffixNumber = suffix)
+            if (candidate !in reservedNames && !doesFileExistInTargetFolder(context, candidate)) {
+                return@withContext candidate
+            }
+            suffix++
+        }
+        buildFileName(date, extension, suffixNumber = (System.currentTimeMillis() % 10000).toInt())
+    }
+
+    suspend fun savePhotoToPictures(
+        context: Context,
+        sourceUri: Uri,
+        fileName: String,
+        mimeType: String
+    ): Result<SaveResult> = withContext(Dispatchers.IO) {
+        try {
+            val resolver = context.contentResolver
+            val nowMillis = System.currentTimeMillis()
+            val nowSeconds = nowMillis / 1000L
+            val nowExifString = LocalDateTime.ofInstant(
+                Instant.ofEpochMilli(nowMillis),
+                ZoneId.systemDefault()
+            ).format(exifWriteFormatter)
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val relativePath = "${Environment.DIRECTORY_PICTURES}/$SUBFOLDER_NAME"
+                val contentValues = ContentValues().apply {
+                    put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+                    put(MediaStore.Images.Media.MIME_TYPE, mimeType)
+                    put(MediaStore.Images.Media.RELATIVE_PATH, relativePath)
+                    put(MediaStore.Images.Media.DATE_TAKEN, nowMillis)
+                    put(MediaStore.Images.Media.DATE_ADDED, nowSeconds)
+                    put(MediaStore.Images.Media.DATE_MODIFIED, nowSeconds)
+                    put(MediaStore.Images.Media.IS_PENDING, 1)
+                }
+
+                val targetUri = resolver.insert(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    contentValues
+                ) ?: return@withContext Result.failure(IOException("Could not create MediaStore entry."))
+
+                try {
+                    resolver.openInputStream(sourceUri)?.use { input ->
+                        resolver.openOutputStream(targetUri, "w")?.use { output ->
+                            input.copyTo(output)
+                        } ?: throw IOException("Could not open output stream.")
+                    } ?: throw IOException("Could not read selected image.")
+
+                    try {
+                        resolver.openFileDescriptor(targetUri, "rw")?.use { pfd ->
+                            val exif = ExifInterface(pfd.fileDescriptor)
+                            exif.setAttribute(ExifInterface.TAG_DATETIME, nowExifString)
+                            exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, nowExifString)
+                            exif.setAttribute(ExifInterface.TAG_DATETIME_DIGITIZED, nowExifString)
+                            exif.saveAttributes()
+                        }
+                    } catch (_: Exception) {
+                    }
+
+                    val completeValues = ContentValues().apply {
+                        put(MediaStore.Images.Media.DATE_TAKEN, nowMillis)
+                        put(MediaStore.Images.Media.DATE_ADDED, nowSeconds)
+                        put(MediaStore.Images.Media.DATE_MODIFIED, nowSeconds)
+                        put(MediaStore.Images.Media.IS_PENDING, 0)
+                    }
+                    resolver.update(targetUri, completeValues, null, null)
+
+                    Result.success(
+                        SaveResult(
+                            savedUri = targetUri,
+                            finalFileName = fileName,
+                            displayPath = "Pictures/$SUBFOLDER_NAME/$fileName"
+                        )
+                    )
+                } catch (e: Exception) {
+                    resolver.delete(targetUri, null, null)
+                    Result.failure(e)
+                }
+            } else {
+                val picturesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+                val appFolder = File(picturesDir, SUBFOLDER_NAME)
+                if (!appFolder.exists() && !appFolder.mkdirs()) {
+                    return@withContext Result.failure(IOException("Failed to create target folder."))
+                }
+
+                val outFile = File(appFolder, fileName)
+                resolver.openInputStream(sourceUri)?.use { input ->
+                    FileOutputStream(outFile).use { output ->
+                        input.copyTo(output)
+                    }
+                } ?: return@withContext Result.failure(IOException("Could not read selected image."))
+
+                try {
+                    val exif = ExifInterface(outFile)
+                    exif.setAttribute(ExifInterface.TAG_DATETIME, nowExifString)
+                    exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, nowExifString)
+                    exif.setAttribute(ExifInterface.TAG_DATETIME_DIGITIZED, nowExifString)
+                    exif.saveAttributes()
+                } catch (_: Exception) {
+                }
+                outFile.setLastModified(nowMillis)
+
+                val values = ContentValues().apply {
+                    put(MediaStore.Images.Media.DATA, outFile.absolutePath)
+                    put(MediaStore.Images.Media.MIME_TYPE, mimeType)
+                    put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+                    put(MediaStore.Images.Media.DATE_TAKEN, nowMillis)
+                    put(MediaStore.Images.Media.DATE_ADDED, nowSeconds)
+                    put(MediaStore.Images.Media.DATE_MODIFIED, nowSeconds)
+                }
+                val insertedUri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                    ?: Uri.fromFile(outFile)
+
+                Result.success(
+                    SaveResult(
+                        savedUri = insertedUri,
+                        finalFileName = fileName,
+                        displayPath = "Pictures/$SUBFOLDER_NAME/$fileName"
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+}
