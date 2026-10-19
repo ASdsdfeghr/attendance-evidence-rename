@@ -28,11 +28,15 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
@@ -92,11 +96,15 @@ fun PhotoRenamerScreen() {
     var isProcessing by remember { mutableStateOf(false) }
     var confettiTrigger by remember { mutableIntStateOf(0) }
 
+    // Custom Smart Selector state
+    var showSmartPickerSheet by remember { mutableStateOf(false) }
+    var isScanningGallery by remember { mutableStateOf(false) }
+    var smartCandidates by remember { mutableStateOf<List<SmartGalleryCandidate>>(emptyList()) }
+
     // Manual date override dialog state
     var editingItemId by remember { mutableStateOf<Int?>(null) }
     var showDatePicker by remember { mutableStateOf(false) }
 
-    // Calculate proposed filenames & flag same-day duplicates automatically with _2, _3
     val proposedNamesMap = remember(photoItems) {
         val dateCounts = mutableMapOf<LocalDate, Int>()
         photoItems.forEach { item ->
@@ -126,34 +134,73 @@ fun PhotoRenamerScreen() {
         map
     }
 
-    // Native Multi-Photo Picker
-    val multiPhotoPickerLauncher = rememberLauncherForActivityResult(
+    fun loadSelectedUris(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        savedResults = emptyList()
+        isProcessing = true
+        scope.launch {
+            try {
+                val loaded = uris.mapIndexed { idx, uri ->
+                    val meta = PhotoUtils.inspectPhoto(context, uri)
+                    SelectedPhotoItem(
+                        id = idx,
+                        uri = uri,
+                        metadata = meta,
+                        chosenDate = meta.captureDate,
+                        dateOrigin = meta.origin
+                    )
+                }
+                photoItems = loaded
+            } catch (e: Exception) {
+                snackbarHostState.showSnackbar(
+                    message = context.getString(R.string.error_reading_photos, e.localizedMessage ?: "")
+                )
+            } finally {
+                isProcessing = false
+            }
+        }
+    }
+
+    // Fallback Native Android Photo Picker
+    val systemPhotoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickMultipleVisualMedia()
     ) { uris: List<Uri> ->
-        if (uris.isNotEmpty()) {
-            savedResults = emptyList()
-            isProcessing = true
-            scope.launch {
-                try {
-                    val loaded = uris.mapIndexed { idx, uri ->
-                        val meta = PhotoUtils.inspectPhoto(context, uri)
-                        SelectedPhotoItem(
-                            id = idx,
-                            uri = uri,
-                            metadata = meta,
-                            chosenDate = meta.captureDate,
-                            dateOrigin = meta.origin
-                        )
-                    }
-                    photoItems = loaded
-                } catch (e: Exception) {
-                    snackbarHostState.showSnackbar(
-                        message = context.getString(R.string.error_reading_photos, e.localizedMessage ?: "")
-                    )
-                } finally {
-                    isProcessing = false
-                }
-            }
+        loadSelectedUris(uris)
+    }
+
+    fun openSmartSelectorAndScan() {
+        showSmartPickerSheet = true
+        isScanningGallery = true
+        scope.launch {
+            smartCandidates = PhotoUtils.scanDeviceForAttendancePhotos(context)
+            isScanningGallery = false
+        }
+    }
+
+    val readMediaPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            openSmartSelectorAndScan()
+        } else {
+            // Gracefully fall back to system photo picker if gallery permission is declined
+            systemPhotoPickerLauncher.launch(
+                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+            )
+        }
+    }
+
+    fun handleSelectPhotosButtonClick() {
+        val readPerm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Manifest.permission.READ_MEDIA_IMAGES
+        } else {
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+
+        if (ContextCompat.checkSelfPermission(context, readPerm) == PackageManager.PERMISSION_GRANTED) {
+            openSmartSelectorAndScan()
+        } else {
+            readMediaPermissionLauncher.launch(readPerm)
         }
     }
 
@@ -204,7 +251,7 @@ fun PhotoRenamerScreen() {
         }
     }
 
-    val legacyPermissionLauncher = rememberLauncherForActivityResult(
+    val legacyWritePermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
@@ -262,7 +309,7 @@ fun PhotoRenamerScreen() {
                                 Manifest.permission.WRITE_EXTERNAL_STORAGE
                             ) != PackageManager.PERMISSION_GRANTED
                         ) {
-                            legacyPermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                            legacyWritePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
                         } else {
                             runBatchRename()
                         }
@@ -277,7 +324,6 @@ fun PhotoRenamerScreen() {
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // Progress Bar While Reading or Renaming
                 if (isProcessing) {
                     item(key = "progress_bar") {
                         LinearProgressIndicator(
@@ -294,15 +340,11 @@ fun PhotoRenamerScreen() {
                 // 2. Hero Card
                 item(key = "hero_card") {
                     MatchDayHeroCard(
-                        onSelectPhotosClick = {
-                            multiPhotoPickerLauncher.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                            )
-                        }
+                        onSelectPhotosClick = { handleSelectPhotosButtonClick() }
                     )
                 }
 
-                // 6. Result State (when photos have been renamed)
+                // 6. Result State
                 if (savedResults.isNotEmpty()) {
                     item(key = "result_state") {
                         MatchDayResultCard(
@@ -322,14 +364,14 @@ fun PhotoRenamerScreen() {
                     }
                 }
 
-                // 5. Empty State (when no photos are selected)
+                // 5. Empty State
                 if (photoItems.isEmpty() && !isProcessing && savedResults.isEmpty()) {
                     item(key = "empty_state") {
                         VolleyballEmptyState()
                     }
                 }
 
-                // 3. Selected Photos Roster Header + Animated List
+                // 3. Selected Photos Roster
                 if (photoItems.isNotEmpty()) {
                     item(key = "roster_header") {
                         Row(
@@ -377,10 +419,28 @@ fun PhotoRenamerScreen() {
             }
         }
 
-        // Confetti Celebration Overlay on Rename Completion
         if (confettiTrigger > 0) {
             ConfettiExplosionOverlay(triggerKey = confettiTrigger)
         }
+    }
+
+    // Custom Smart Attendance Photo Selector Modal Sheet
+    if (showSmartPickerSheet) {
+        SmartAttendancePickerSheet(
+            candidates = smartCandidates,
+            isScanning = isScanningGallery,
+            onDismiss = { showSmartPickerSheet = false },
+            onConfirmSelection = { chosenUris ->
+                showSmartPickerSheet = false
+                loadSelectedUris(chosenUris)
+            },
+            onOpenSystemPicker = {
+                showSmartPickerSheet = false
+                systemPhotoPickerLauncher.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                )
+            }
+        )
     }
 
     // Manual Date Picker Override Dialog
@@ -441,8 +501,344 @@ fun PhotoRenamerScreen() {
 }
 
 /**
- * Staggered fade + slide-in animation wrapper for each photo row.
+ * Custom Match-Day Smart Selector Modal Sheet:
+ * Automatically filters the camera roll by the NQD P.E. Uniform + Campus + 2-Person Selfie signature.
  */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SmartAttendancePickerSheet(
+    candidates: List<SmartGalleryCandidate>,
+    isScanning: Boolean,
+    onDismiss: () -> Unit,
+    onConfirmSelection: (List<Uri>) -> Unit,
+    onOpenSystemPicker: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var showOnlyMatches by remember { mutableStateOf(true) }
+    val selectedUris = remember { mutableStateListOf<Uri>() }
+
+    val matchedList = remember(candidates) {
+        candidates.filter { it.isAttendanceMatch }.sortedByDescending { it.matchScore }
+    }
+
+    // If no photos matched the strict threshold, automatically show all camera photos
+    LaunchedEffect(isScanning, matchedList.size) {
+        if (!isScanning && matchedList.isEmpty() && candidates.isNotEmpty()) {
+            showOnlyMatches = false
+        }
+    }
+
+    val displayedPhotos = if (showOnlyMatches) matchedList else candidates
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = PosterInk,
+        contentColor = PosterOffWhite,
+        shape = JerseyCardShape,
+        dragHandle = null
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.88f)
+                .navigationBarsPadding()
+        ) {
+            // Top Poster Bar
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(PosterCharcoal)
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.smart_picker_title).uppercase(Locale.getDefault()),
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = PosterOffWhite
+                        )
+                        Text(
+                            text = stringResource(R.string.smart_picker_subtitle),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = PosterOrangeRed
+                        )
+                    }
+
+                    TextButton(
+                        onClick = onOpenSystemPicker,
+                        modifier = Modifier.defaultMinSize(minHeight = 48.dp)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.smart_picker_system_btn).uppercase(Locale.getDefault()),
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = PosterGray
+                        )
+                    }
+
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = stringResource(R.string.action_cancel),
+                            tint = PosterOffWhite
+                        )
+                    }
+                }
+
+                // Filter Tabs: SMART MATCH vs ALL CAMERA
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    FilterTabChip(
+                        label = stringResource(R.string.smart_tab_detected, matchedList.size),
+                        selected = showOnlyMatches,
+                        onClick = { showOnlyMatches = true },
+                        modifier = Modifier.weight(1f)
+                    )
+                    FilterTabChip(
+                        label = stringResource(R.string.smart_tab_all, candidates.size),
+                        selected = !showOnlyMatches,
+                        onClick = { showOnlyMatches = false },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(2.dp)
+                    .background(PosterOrangeRed)
+            )
+
+            // Center Content: Scanning state or 3-Column Jersey Grid
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                if (isScanning) {
+                    Column(
+                        modifier = Modifier.align(Alignment.Center),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        CircularProgressIndicator(color = PosterOrangeRed)
+                        Text(
+                            text = stringResource(R.string.smart_picker_scanning),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = PosterGray
+                        )
+                    }
+                } else if (displayedPhotos.isEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.smart_picker_empty),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = PosterGray,
+                            textAlign = TextAlign.Center
+                        )
+                        PosterOutlinedButton(
+                            text = stringResource(R.string.smart_picker_system_btn),
+                            onClick = onOpenSystemPicker
+                        )
+                    }
+                } else {
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(3),
+                        contentPadding = PaddingValues(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        items(
+                            items = displayedPhotos,
+                            key = { it.uri.toString() }
+                        ) { candidate ->
+                            val isSelected = candidate.uri in selectedUris
+                            SmartPhotoGridCell(
+                                candidate = candidate,
+                                isSelected = isSelected,
+                                onToggle = {
+                                    if (isSelected) {
+                                        selectedUris.remove(candidate.uri)
+                                    } else {
+                                        selectedUris.add(candidate.uri)
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Bottom Sticky Confirm Selection Bar
+            Surface(
+                color = PosterCharcoal,
+                contentColor = PosterOffWhite
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    PosterButton(
+                        text = stringResource(R.string.smart_picker_add_btn, selectedUris.size),
+                        enabled = selectedUris.isNotEmpty(),
+                        icon = Icons.Default.Check,
+                        onClick = { onConfirmSelection(selectedUris.toList()) },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FilterTabChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = JerseyChipShape,
+        color = if (selected) PosterOrangeRed else PosterInk,
+        contentColor = if (selected) PosterOffWhite else PosterGray,
+        border = BorderStroke(1.dp, if (selected) PosterOrangeRed else PosterDarkOutline),
+        modifier = modifier
+            .defaultMinSize(minHeight = 44.dp)
+            .clip(JerseyChipShape)
+            .clickable(onClick = onClick)
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+        ) {
+            Text(
+                text = label.uppercase(Locale.getDefault()),
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun SmartPhotoGridCell(
+    candidate: SmartGalleryCandidate,
+    isSelected: Boolean,
+    onToggle: () -> Unit
+) {
+    val dayMonthTag = remember(candidate.dateTaken) {
+        PhotoUtils.formatDateAsDayMonth(candidate.dateTaken)
+    }
+
+    Box(
+        modifier = Modifier
+            .aspectRatio(0.85f)
+            .clip(JerseyThumbShape)
+            .background(PosterCharcoal)
+            .border(
+                width = if (isSelected) 3.dp else 1.dp,
+                color = if (isSelected) PosterOrangeRed else PosterDarkOutline,
+                shape = JerseyThumbShape
+            )
+            .clickable(onClick = onToggle)
+    ) {
+        Image(
+            bitmap = candidate.thumbnail.asImageBitmap(),
+            contentDescription = candidate.displayName,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize()
+        )
+
+        // Top-Left: Match Score Badge for Detected Attendance Shots
+        if (candidate.isAttendanceMatch) {
+            Surface(
+                shape = JerseyChipShape,
+                color = PosterInk.copy(alpha = 0.86f),
+                border = BorderStroke(1.dp, PosterOrangeRed),
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(4.dp)
+            ) {
+                Text(
+                    text = "${candidate.matchScore}%",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                    color = PosterOrangeRed,
+                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                )
+            }
+        }
+
+        // Top-Right: Selection Checkmark Circle
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(6.dp)
+                .size(24.dp)
+                .clip(CircleShape)
+                .background(if (isSelected) PosterOrangeRed else PosterInk.copy(alpha = 0.65f))
+                .border(1.5.dp, PosterOffWhite, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            if (isSelected) {
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = null,
+                    tint = PosterOffWhite,
+                    modifier = Modifier.size(15.dp)
+                )
+            }
+        }
+
+        // Bottom Bar: Preview of d-m filename + Detected Feature Tag
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .background(PosterInk.copy(alpha = 0.82f))
+                .padding(horizontal = 6.dp, vertical = 4.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "$dayMonthTag.jpg",
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                    color = PosterOffWhite
+                )
+            }
+            Text(
+                text = candidate.featureBadge,
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                color = if (candidate.isAttendanceMatch) PosterGreen else PosterGray,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
 @Composable
 private fun AnimatedRosterRowWrapper(
     index: Int,
@@ -465,10 +861,6 @@ private fun AnimatedRosterRowWrapper(
     }
 }
 
-/**
- * 1. HEADER: Club logo on left, huge Barlow Condensed ExtraBold Italic title in center
- * with school name directly underneath, school badge on right, and diagonal orange stripes.
- */
 @Composable
 fun MatchDayHeader(
     clubLogoBitmap: Bitmap?,
@@ -486,7 +878,6 @@ fun MatchDayHeader(
                 .statusBarsPadding()
                 .clipToBounds()
         ) {
-            // Orange Diagonal Stripe Accent in the Header Background
             Canvas(modifier = Modifier.matchParentSize()) {
                 val w = size.width
                 val h = size.height
@@ -518,12 +909,10 @@ fun MatchDayHeader(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    // Left: Black Diamond Club Logo
                     ClubDiamondLogo(bitmap = clubLogoBitmap)
 
                     Spacer(modifier = Modifier.width(12.dp))
 
-                    // Center: Uppercase Poster Title (32-40sp) + School Name directly underneath
                     Column(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.Center
@@ -553,14 +942,12 @@ fun MatchDayHeader(
 
                     Spacer(modifier = Modifier.width(12.dp))
 
-                    // Right: School Badge (48dp touch target)
                     SchoolHeaderBadge(
                         bitmap = schoolLogoBitmap,
                         onClick = onSchoolBadgeClick
                     )
                 }
 
-                // Bottom solid orange-red poster divider bar
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -572,9 +959,6 @@ fun MatchDayHeader(
     }
 }
 
-/**
- * 2. HERO CARD: Short tagline, one line of instructions, and a wide "SELECT PHOTOS" button.
- */
 @Composable
 fun MatchDayHeroCard(
     onSelectPhotosClick: () -> Unit
@@ -587,7 +971,6 @@ fun MatchDayHeroCard(
         modifier = Modifier.fillMaxWidth()
     ) {
         Box(modifier = Modifier.fillMaxWidth()) {
-            // Left vertical accent stripe
             Box(
                 modifier = Modifier
                     .width(6.dp)
@@ -627,13 +1010,6 @@ fun MatchDayHeroCard(
     }
 }
 
-/**
- * 3. SELECTED PHOTO ROW:
- * - Huge faded day-of-month numeral behind each row like a jersey number
- * - Thumbnail, original filename, arrow, new name (5-3.jpg) in an orange chip
- * - Duplicate warning chip with auto-suffix (5-3_2.jpg)
- * - Fallback chip if EXIF was missing and file date was used
- */
 @Composable
 fun JerseyPhotoRow(
     item: SelectedPhotoItem,
@@ -666,7 +1042,6 @@ fun JerseyPhotoRow(
                 .fillMaxWidth()
                 .clipToBounds()
         ) {
-            // Huge Faded Day-of-Month Numeral Behind Row (Jersey Number Watermark)
             Text(
                 text = item.chosenDate.dayOfMonth.toString(),
                 style = MaterialTheme.typography.displayLarge.copy(
@@ -690,7 +1065,6 @@ fun JerseyPhotoRow(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Thumbnail with Jersey Cut Corner
                     Box(
                         modifier = Modifier
                             .size(68.dp)
@@ -718,7 +1092,6 @@ fun JerseyPhotoRow(
                         }
                     }
 
-                    // Filename Transformation: Original -> Arrow -> Orange Chip (5-3.jpg)
                     Column(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -747,7 +1120,6 @@ fun JerseyPhotoRow(
                                 color = PosterOrangeRed
                             )
 
-                            // New Filename in an Orange Jersey Chip
                             Surface(
                                 shape = JerseyChipShape,
                                 color = PosterOrangeRed,
@@ -763,7 +1135,6 @@ fun JerseyPhotoRow(
                             }
                         }
 
-                        // Capture Date + Status Chips (DUPLICATE / FALLBACK)
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -780,7 +1151,6 @@ fun JerseyPhotoRow(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
 
-                            // FALLBACK Chip when EXIF is missing
                             if (item.dateOrigin == CaptureDateOrigin.FILE_FALLBACK) {
                                 StatusBadgeChip(
                                     text = stringResource(R.string.chip_fallback),
@@ -797,7 +1167,6 @@ fun JerseyPhotoRow(
                                 )
                             }
 
-                            // DUPLICATE Warning Chip when multiple photos share the same day
                             if (isDuplicate) {
                                 StatusBadgeChip(
                                     text = stringResource(R.string.chip_duplicate),
@@ -850,9 +1219,6 @@ private fun StatusBadgeChip(
     }
 }
 
-/**
- * 4. STICKY BOTTOM BAR: Photo count + wide "RENAME ALL" button (disabled until photos are selected).
- */
 @Composable
 fun MatchDayBottomBar(
     photoCount: Int,
@@ -917,9 +1283,6 @@ fun MatchDayBottomBar(
     }
 }
 
-/**
- * 5. EMPTY STATE: Custom Volleyball vector illustration and "No photos yet. Pick your attendance shots."
- */
 @Composable
 fun VolleyballEmptyState() {
     val volleyballDesc = stringResource(R.string.cd_volleyball_icon)
@@ -939,7 +1302,6 @@ fun VolleyballEmptyState() {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Custom Stylized Volleyball Vector Graphic
             Canvas(
                 modifier = Modifier
                     .size(84.dp)
@@ -949,7 +1311,6 @@ fun VolleyballEmptyState() {
                 val center = Offset(size.width / 2f, size.height / 2f)
                 val strokeWidth = 3.5.dp.toPx()
 
-                // Outer ball seam
                 drawCircle(
                     color = PosterOrangeRed,
                     radius = r * 0.92f,
@@ -957,7 +1318,6 @@ fun VolleyballEmptyState() {
                     style = Stroke(width = strokeWidth)
                 )
 
-                // Curved volleyball panel seams
                 drawArc(
                     color = PosterOrangeRed,
                     startAngle = -40f,
@@ -985,7 +1345,6 @@ fun VolleyballEmptyState() {
                     size = Size(r * 1.44f, r * 1.44f),
                     style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
                 )
-                // Inner cross-seam accents
                 drawLine(
                     color = PosterGray,
                     start = Offset(center.x, center.y - r * 0.9f),
@@ -1016,9 +1375,6 @@ fun VolleyballEmptyState() {
     }
 }
 
-/**
- * 6. RESULT STATE: Green check (#2FB36D), "12 photos renamed", "Share" and "Start over" buttons.
- */
 @Composable
 fun MatchDayResultCard(
     renamedCount: Int,
@@ -1044,7 +1400,6 @@ fun MatchDayResultCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Green Check Badge (#2FB36D)
                 Box(
                     modifier = Modifier
                         .size(48.dp)
@@ -1078,7 +1433,6 @@ fun MatchDayResultCard(
                 }
             }
 
-            // Saved file chips (tappable to preview in Gallery)
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 savedResults.forEach { res ->
                     Surface(
@@ -1113,7 +1467,6 @@ fun MatchDayResultCard(
                 }
             }
 
-            // "Share" and "Start over" Action Buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -1138,9 +1491,6 @@ fun MatchDayResultCard(
     }
 }
 
-/**
- * Wide, bold uppercase Poster Button with 0.97x press scale animation and 48dp+ touch target.
- */
 @Composable
 fun PosterButton(
     text: String,
@@ -1243,9 +1593,6 @@ fun PosterOutlinedButton(
     }
 }
 
-/**
- * Black diamond NQD Volleyball Club logo with orange-red accents.
- */
 @Composable
 fun ClubDiamondLogo(bitmap: Bitmap?) {
     val desc = stringResource(R.string.cd_club_logo)
@@ -1287,9 +1634,6 @@ fun ClubDiamondLogo(bitmap: Bitmap?) {
     }
 }
 
-/**
- * School badge on the right of the header (48dp+ minimum touch target).
- */
 @Composable
 fun SchoolHeaderBadge(
     bitmap: Bitmap?,
