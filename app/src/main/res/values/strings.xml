@@ -1,11 +1,20 @@
-<resources>
+<<resources>
     <string name="app_name">NQD Volley Attendance</string>
     <string name="header_title">NQD Volley Attendance</string>
     <string name="school_subtitle">THPT Chuyên Nguyễn Quang Diêu • Since 2017</string>
 
     <string name="hero_tagline">Match-Day Attendance Roster</string>
-    <string name="hero_instructions">Pick your court shots to auto-tag each file as d-m.jpg from EXIF capture dates.</string>
-    <string name="action_select_photos">Select Photos</string>
+    <string name="hero_instructions">Smart-scans your camera roll for NQD P.E. uniform &amp; campus group shots, then renames to d-m.jpg.</string>
+    <string name="action_select_photos">Smart Select Photos</string>
+
+    <string name="smart_picker_title">Smart Attendance Selector</string>
+    <string name="smart_picker_subtitle">Auto-detected NQD P.E. uniform + campus group shots</string>
+    <string name="smart_picker_system_btn">System Picker</string>
+    <string name="smart_tab_detected">Smart Match (%1$d)</string>
+    <string name="smart_tab_all">All Camera (%1$d)</string>
+    <string name="smart_picker_scanning">Scanning camera roll for NQD P.E. attendance shots…</string>
+    <string name="smart_picker_empty">No matching attendance photos found in recent camera roll.</string>
+    <string name="smart_picker_add_btn">Add Selected (%1$d)</string>
 
     <string name="roster_section_title">Attendance Roster</string>
     <string name="tap_date_hint">Tap a row to adjust date</string>
