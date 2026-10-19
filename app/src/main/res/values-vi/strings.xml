@@ -4,8 +4,17 @@
     <string name="school_subtitle">THPT Chuyên Nguyễn Quang Diêu • Từ 2017</string>
 
     <string name="hero_tagline">Bảng Điểm Danh Ngày Thi Đấu</string>
-    <string name="hero_instructions">Chọn ảnh điểm danh trên sân để tự động đổi tên theo ngày chụp d-m.jpg.</string>
-    <string name="action_select_photos">Chọn Ảnh</string>
+    <string name="hero_instructions">Tự động lọc ảnh mặc đồng phục thể dục NQD chụp cùng nhóm ở sân trường và đổi tên sang d-m.jpg.</string>
+    <string name="action_select_photos">Chọn Ảnh Thông Minh</string>
+
+    <string name="smart_picker_title">Bộ Lọc Ảnh Điểm Danh</string>
+    <string name="smart_picker_subtitle">Tự nhận diện áo thể dục NQD + chụp đôi ngoài sân trường</string>
+    <string name="smart_picker_system_btn">Thư Viện Máy</string>
+    <string name="smart_tab_detected">Ảnh Điểm Danh (%1$d)</string>
+    <string name="smart_tab_all">Tất Cả Ảnh (%1$d)</string>
+    <string name="smart_picker_scanning">Đang quét tìm ảnh đồng phục thể dục NQD…</string>
+    <string name="smart_picker_empty">Chưa tìm thấy ảnh điểm danh phù hợp trong cuộn camera gần đây.</string>
+    <string name="smart_picker_add_btn">Thêm Ảnh Đã Chọn (%1$d)</string>
 
     <string name="roster_section_title">Danh Sách Ảnh Đã Chọn</string>
     <string name="tap_date_hint">Chạm vào thẻ để đổi ngày</string>
